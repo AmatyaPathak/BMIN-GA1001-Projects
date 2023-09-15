@@ -1,0 +1,222 @@
+Outline for RNA-seq analysis
+
+1. Log on to Big Purple
+
+ssh js11352@bigpurple.nyumc.org
+
+2. Get on compute node
+
+srun -c1 -t8:00:00 --mem=16000 --pty /bin/bash 
+
+3. Navigate to scratch folder
+
+cd /gpfs/scratch/js11352/
+
+3. Create new directory and move there
+
+mkdir Bioinformatics
+cd Bioinformatics
+
+5. Create batch array script for downloading SRR data
+
+vi SRAdownload.sh
+
+############################
+
+#!/bin/bash
+#SBATCH --job-name=SRAdownloadHW2
+#SBATCH --mail-type=END,FAIL
+#SBATCH --mail-user=jacob.swanson@nyulangone.org 
+#SBATCH --ntasks=1  
+#SBATCH --mem=16gb
+#SBATCH --time=10:00:00
+#SBATCH --output=SRAdownloadHW2_%j.log
+#SBATCH -p cpu_short
+
+module load sratoolkit/2.10.9
+
+fasterq-dump -t /gpfs/scratch/js11352/Bioinformatics -p SRR###${SLURM_ARRAY_TASK_ID} 
+
+#############################
+
+6. Download data
+
+sbatch --array=###,###,### SRAdownload.sh
+
+*view log progress*
+
+tail -f SRAdownloadHW2job#####.log
+
+7. Perform QC on untrimmed reads 
+
+module load fastqc/0.11.7
+
+fastqc -o /gpfs/scratch/js11352/Bioinformatics SRRRead1.fastq SRRRead2.fastq
+
+
+8. Copy FASTQC .html report to local computer
+
+*In separate Terminal window*
+
+scp js11352@bigpurple.nyumc.org:/gpfs/data/courses/bmscga2604/2021/SRR1523671_1_val_1_fastqc.html /Users/js11352/Desktop
+
+9. Trim dataset
+
+module purge
+module load trimgalore/0.5.0
+module load python/cpu/3.6.5
+module load fastqc/0.11.7
+
+trim_galore --q ???? —paired??? --fastqc /gpfs/scratch/js11352/Bioinformatics/HW2_Practicum/SRR1523671_1.fastq /gpfs/scratch/js11352/Bioinformatics/HW2_Practicum/SRR1523671_2.fastq
+
+10. Copy trimmed FASTQ .html files to local computer
+
+*Inspect .html files on local computer and see if any further trimming is needed* 
+
+11. Align trimmed FASTQ files to genome
+
+module load tophat/2.1.1
+module load bowtie2/2.3.5.1
+
+tophat2 -o /gpfs/scratch/js11352/Bioinformatics/HW2_Practicum --library-type ???????? -p8 -G /gpfs/scratch/js11352/Homo_sapiens/UCSC/hg38/Annotation/Genes/genes.gtf /gpfs/scratch/js11352/Homo_sapiens/UCSC/hg38/Sequence/Bowtie2Index/genome /gpfs/scratch/js11352/Bioinformatics/HW2_Practicum/SRR1523671_1_val_1.fq /gpfs/scratch/js11352/Bioinformatics/HW2_Practicum/SRR1523671_2_val_2.fq
+
+*.gtf annotation files and indexed genome files are available on module through BigPurple* 
+
+12. SAMTOOLS PROCESSING
+samtools view -bS -o /gpfs/scratch/kerberosID/Adenovirus/bt2.mapping.bam /gpfs/scratch/kerberosID/Adenovirus/bt2.mapping.sam
+samtools sort -o /gpfs/scratch/kerberosID/Adenovirus/bt2.mapping.sorted.bam /gpfs/scratch/kerberosID/Adenovirus/bt2.mapping.bam
+samtools index /gpfs/scratch/kerberosID/Adenovirus/bt2.mapping.sorted.bam
+
+13. STRAND SEPERATION
+samtools view -b -f 83 /gpfs/scratch/kerberosID/Adenovirus/bt2.mapping.sorted.bam > /gpfs/scratch/kerberosID/Adenovirus/fwd1.bam
+samtools view -b -f 163 /gpfs/scratch/kerberosID/Adenovirus/bt2.mapping.sorted.bam > /gpfs/scratch/kerberosID/Adenovirus/fwd2.bam
+samtools index /gpfs/scratch/kerberosID/Adenovirus/fwd1.bam
+samtools index /gpfs/scratch/kerberosID/Adenovirus/fwd2.bam
+samtools merge -f /gpfs/scratch/kerberosID/Adenovirus/fwd.bam /gpfs/scratch/kerberosID/Adenovirus/fwd1.bam /gpfs/scratch/kerberosID/Adenovirus/fwd2.bam
+samtools index /gpfs/scratch/kerberosID/Adenovirus/fwd.bam
+
+samtools view -b -f 99 /gpfs/scratch/kerberosID/Adenovirus/bt2.mapping.sorted.bam > /gpfs/scratch/kerberosID/Adenovirus/rev1.bam
+samtools view -b -f 147 /gpfs/scratch/kerberosID/Adenovirus/bt2.mapping.sorted.bam > /gpfs/scratch/kerberosID/Adenovirus/rev2.bam
+samtools index /gpfs/scratch/kerberosID/Adenovirus/rev1.bam
+samtools index /gpfs/scratch/kerberosID/Adenovirus/rev2.bam
+samtools merge -f /gpfs/scratch/kerberosID/Adenovirus/rev.bam /gpfs/scratch/kerberosID/Adenovirus/rev1.bam /gpfs/scratch/kerberosID/Adenovirus/rev2.bam
+samtools index /gpfs/scratch/kerberosID/Adenovirus/rev.bam
+
+14. BEDGRAPH FILES
+samtools view -b /gpfs/scratch/kerberosID/Adenovirus/fwd.bam | genomeCoverageBed -ibam stdin -bg -split > /gpfs/scratch/kerberosID/Adenovirus/bt2.Ad5R1-fwd.bedgraph
+samtools view -b /gpfs/scratch/kerberosID/Adenovirus/rev.bam | genomeCoverageBed -ibam stdin -bg -split > /gpfs/scratch/kerberosID/Adenovirus/bt2.Ad5R1-rev.bedgraph
+
+15. BED12 FILES
+bamToBed -bed12 -i /gpfs/scratch/kerberosID/Adenovirus/fwd.bam > /gpfs/scratch/kerberosID/Adenovirus/bt2.Ad5R1-fwd.bed
+bamToBed -bed12 -i /gpfs/scratch/kerberosID/Adenovirus/rev.bam > /gpfs/scratch/kerberosID/Adenovirus/bt2.Ad5R1-rev.bed
+
+16. Visualize BEDGRAPH files in Gviz using RStudio 
+
+
+### Install required R modules (if not available, reinstall as admin)
+install.packages("data.table")
+BiocManager::install("Gviz")
+BiocManager::install("GenomicFeatures")
+BiocManager::install("org.Hs.eg.db")
+
+### Load required R modules (if not available, reinstall as admin)
+library(data.table)
+library(Gviz)
+library(GenomicFeatures)
+library(org.Hs.eg.db)
+
+### Set directory to work in
+setwd("~/Desktop")
+
+
+###Forward Strand Gene###
+
+### Specify genome name, chromosome number, and co-ordinates for mapping
+myGenome = "hg38"
+myChr = "chr12"  
+
+#GAPDH
+myStart = 6534512
+myEnd = 6538374
+
+### Read in bedgraph files as simple text files (specify column headers)
+bedFile1 <- fread('accepted_hits_sorted_fwd.bedgraph', col.names = c('chromosome', 'start', 'end', 'value'))
+bedFile2 <- fread('accepted_hits_sorted_rev.bedgraph', col.names = c('chromosome', 'start', 'end', 'value'))
+bedFile3 <- fread('accepted_hits_sorted.bedgraph', col.names = c('chromosome', 'start', 'end', 'value'))
+
+### Determine the maximium depth value within the specified mapping co-ordinates
+ChrData<-bedFile3[bedFile3$chromosome=="chr12",]
+ChrData2<-ChrData[ChrData$start>myStart]
+ChrData3<-ChrData2[ChrData2$end<myEnd,]
+maxV<-max(ChrData3$value)
+
+### Generate dataTracks - type ?DataTrack to see options
+dataTrack1 <- DataTrack(range = bedFile1, type = "a", chromosome=myChr, genome = myGenome, name = "Seq. Depth", fill = "dark blue", col = "black", background.title = "black", ylim=c(0,maxV))
+dataTrack2 <- DataTrack(range = bedFile2, type = "a", chromosome=myChr, genome = myGenome, name = "Seq. Depth", fill = "dark red", col = "black", background.title = "transparent", ylim=c(maxV,0)) 
+dataTrack3 <- DataTrack(range = bedFile3, type = "a", chromosome=myChr, genome = myGenome, name = "Seq. Depth", fill = "dark green", col = "black", background.title = "transparent") 
+
+### Generate genome and ideogram tracks
+gtrack<-GenomeAxisTrack(col="black") 
+itrack <- IdeogramTrack(genome = myGenome, chromosome = myChr)
+
+### Read in UCSC genes and track 
+ucscGenes <- UcscTrack(genome = myGenome, table="ncbiRefSeq", track = 'NCBI RefSeq', trackType="GeneRegionTrack",
+                       chromosome=myChr, rstarts = "exonStarts", rends = "exonEnds",
+                       gene = "name", symbol = 'name', transcript = "name",
+                       strand = "strand", stacking = 'pack', showID = T, geneSymbol = T)
+
+z <- ranges(ucscGenes)
+mcols(z)$symbol <- mapIds(org.Hs.eg.db, gsub("\\.[1-9]$", "", mcols(z)$symbol), "SYMBOL","REFSEQ")
+ucscGenes2 <- ucscGenes
+ranges(ucscGenes2) <- z
+
+### GENERATE PLOT ###
+plotTracks(list(itrack,dataTrack1,dataTrack2,dataTrack3,gtrack,ucscGenes2), collapseTranscripts = "meta", transcriptAnnotation = "symbol", from = myStart, to = myEnd, sizes=c(0.05,0.2,0.2,0.2,0.1,0.2), type="hist", col.histogram=NA, cex.title=1, cex.axis=1, title.width=1.2, main=myChr)
+
+
+### GENERATE PLOT WITH LOG2 SCALED DATA - NOTE: NEED TO CHANGE Y-LIM VALUES IN dataTrack GENERATION
+#plotTracks(list(itrack,dataTrack1,gtrack,ucscGenes2,dataTrack2), collapseTranscripts = "meta", transcriptAnnotation = "symbol", from = myStart, to = myEnd, sizes=c(0.05,0.4,0.1,0.05,0.4), type="hist", col.histogram=NA, cex.title=1, cex.axis=1, title.width=1.2, transformation=function(x){log2(x+1)})
+
+###Reverse Strand Gene###
+
+### Specify genome name, chromosome number, and co-ordinates for mapping
+myGenome = "hg38"
+myChr = "chr12"  
+
+#ACTB chr7:5,526,409-5,563,902 (- strand)
+myStart = 49184686
+myEnd = 49189080
+
+### Read in bedgraph files as simple text files (specify column headers)
+bedFile1 <- fread('accepted_hits_sorted_fwd.bedgraph', col.names = c('chromosome', 'start', 'end', 'value'))
+bedFile2 <- fread('accepted_hits_sorted_rev.bedgraph', col.names = c('chromosome', 'start', 'end', 'value'))
+bedFile3 <- fread('accepted_hits_sorted.bedgraph', col.names = c('chromosome', 'start', 'end', 'value'))
+
+### Determine the maximium depth value within the specified mapping co-ordinates
+ChrData<-bedFile3[bedFile3$chromosome=="chr12",]
+ChrData2<-ChrData[ChrData$start>myStart]
+ChrData3<-ChrData2[ChrData2$end<myEnd,]
+maxV<-max(ChrData3$value)
+
+### Generate dataTracks - type ?DataTrack to see options
+dataTrack1 <- DataTrack(range = bedFile1, type = "a", chromosome=myChr, genome = myGenome, name = "Seq. Depth", fill = "dark blue", col = "black", background.title = "black", ylim=c(0,maxV))
+dataTrack2 <- DataTrack(range = bedFile2, type = "a", chromosome=myChr, genome = myGenome, name = "Seq. Depth", fill = "dark red", col = "black", background.title = "transparent", ylim=c(maxV,0)) 
+dataTrack3 <- DataTrack(range = bedFile3, type = "a", chromosome=myChr, genome = myGenome, name = "Seq. Depth", fill = "dark green", col = "black", background.title = "transparent") 
+
+### Generate genome and ideogram tracks
+gtrack<-GenomeAxisTrack(col="black") 
+itrack <- IdeogramTrack(genome = myGenome, chromosome = myChr)
+
+### Read in UCSC genes and track 
+ucscGenes <- UcscTrack(genome = myGenome, table="ncbiRefSeq", track = 'NCBI RefSeq', trackType="GeneRegionTrack",
+                       chromosome=myChr, rstarts = "exonStarts", rends = "exonEnds",
+                       gene = "name", symbol = 'name', transcript = "name",
+                       strand = "strand", stacking = 'pack', showID = T, geneSymbol = T)
+
+z <- ranges(ucscGenes)
+mcols(z)$symbol <- mapIds(org.Hs.eg.db, gsub("\\.[1-9]$", "", mcols(z)$symbol), "SYMBOL","REFSEQ")
+ucscGenes2 <- ucscGenes
+ranges(ucscGenes2) <- z
+
+### GENERATE PLOT ###
+plotTracks(list(itrack,dataTrack1,dataTrack2,dataTrack3,gtrack,ucscGenes2), collapseTranscripts = "meta", transcriptAnnotation = "symbol", from = myStart, to = myEnd, sizes=c(0.05,0.2,0.2,0.2,0.1,0.2), type="hist", col.histogram=NA, cex.title=1, cex.axis=1, title.width=1.2, main=myChr)
